@@ -1,6 +1,16 @@
 from libs.structure import DataStructure,StructList
-from libs.structure import c_byte,c_word,c_dword,c_qword
+from libs.structure import c_byte,c_word,c_dword,c_qword,c_wchar,c_char
 from libs.kdNRV2b import inflate as unrv2b
+from libs.UCL import UCL
+#from ctypes import bytearray
+
+_UCL = None
+def decompress(data,size):
+    global _UCL
+    if not _UCL:
+        _UCL = UCL()
+    return _UCL.decompress(data,size)
+
 
 class Header(DataStructure):
     _have_data = False
@@ -12,7 +22,28 @@ class Header(DataStructure):
             ret += '%02x' % self.md5[i]
         return ret
 
+class PESettings(DataStructure):
+    compId = None
+    _have_data = False
+    _pack_ =1
+    _fields_ = [('size',c_dword),('_compId',c_wchar*60),('guid',c_char*0x10),('_RC4KEY',c_byte*0x102),
+                ('exeFile',c_char*20),('reportFile',c_char*20),('regKey',c_char*10),('regDynamicConfig',c_char*10),
+                ('regLocalConfig',c_char*10),('regLocalSettings',c_char*10),('processInfectionId',c_dword),('storageArrayKey',c_dword)
+    ]
 
+    def _print__compId(self):
+        return 'compId: ' + self.compId
+    def _print__RC4KEY(self):
+        b = bytearray(self._RC4KEY)
+        return str(b).encode('hex')
+
+    def __getattribute__(self,name):
+        if name=='compId':
+            return self._compId if self._compId[0].__class__ == unicode else ''.join(map(lambda x:x[0],self._compId)).strip("\x00")
+        elif name == 'RC4KEY':
+            return self._print__RC4KEY()
+        else:
+            return object.__getattribute__(self, name)
 
 class Item(DataStructure):
     _flags = {
@@ -46,18 +77,23 @@ class Item(DataStructure):
 
     def _print_id(self):
         if self.id in self._cfgids:
-            return 'ID: %s' % self._cfgids[self.id]
-        return 'ID: %d' % self.id
+            return '%s' % self._cfgids[self.id]
+        return '%d' % self.id
 
     def feed(self,data):
         super(Item,self).feed(data)
 
-        if self.flags & self._flags['ITEMF_COMPRESSED'] and\
-           self.realSize != self.size:
-            self.decompress()
+        ## apperently we ca have decompression without changed size...
+        if self.flags & self._flags['ITEMF_COMPRESSED']:
+           self.decompress()
 
     def decompress(self):
-        self.data = unrv2b(self.data,self.realSize).run(1)
+        self.data = decompress(self.data,self.realSize)#.run(1)
+#        self.data = unrv2b(self.data,self.realSize).run(1)
+
+
+    def is_compresed(self):
+        return self.flags & self._flags['ITEMF_COMPRESSED'] 
 
     def is_option(self):
         return self.flags & self._flags['ITEMF_IS_OPTION'] 
@@ -67,6 +103,12 @@ class Item(DataStructure):
 
     def is_setting(self):
         return self.flags & self._flags['ITEMF_IS_SETTING'] 
+
+    def is_version(self):
+        return self.id == self._cfgids_n['CFGID_LAST_VERSION']
+
+    def is_update(self):
+        return self.id == self._cfgids_n['CFGID_LAST_VERSION_URL']                
 
     def is_injectlist(self):
         return self.id == self._cfgids_n['CFGID_HTTP_INJECTS_LIST']
@@ -79,6 +121,17 @@ class Item(DataStructure):
 
     def is_acfg_url(self):
         return self.id == self._cfgids_n['CFGID_URL_ADV_SERVERS']    
+
+    def is_dnslist(self):
+        return self.id == self._cfgids_n['CFGID_DNS_LIST']
+
+    def is_dnsfilter(self):
+        return self.id == self._cfgids_n['CFGID_DNS_FILTER']
+
+    def is_cmdlist(self):
+        return self.id == self._cfgids_n['CFGID_CMD_LIST']
+
+
 
 _http_inj_Flags ={
         'FLAG_IS_FAKE'                  : 0x0001,
@@ -102,7 +155,7 @@ class HttpInject_InjectBlock(DataStructure):
     _flags  = _http_inj_Flags
 
     def _print_flags(self):
-        return 'FLAGS %x' % self.flags
+        return '%x' % self.flags
   
 class HttpInject_BList(StructList):
     struct = HttpInject_InjectBlock
