@@ -171,7 +171,7 @@ def ciph(d,k):
 if __name__ == '__main__':
     args = aparse.parse_args()    
     if args.type == 'bin':
-        with open(args.key) as f: key = f.read()
+        with open(args.key, 'rb') as f: key = f.read()
     elif args.type == 'str':
         key = args.key
     elif args.type == 'hexstr':
